@@ -1,20 +1,32 @@
 function saveUserData() {
+  let slubData = document.getElementById('portal_field').value == 'slub'
+  let id_prefix = slubData ? 'slub_': ''
   var asdf = document.getElementById('username_field').value
   var fdsa = document.getElementById('password_field').value
   if (asdf === '' || fdsa === '') {
-    document.getElementById('status_msg').innerHTML = "<font color='red'>Die Felder d&uuml;rfen nicht leer sein!</font>"
+    document.getElementById(id_prefix + 'status_msg').innerHTML = "<font color='red'>Die Felder d&uuml;rfen nicht leer sein!</font>"
     return false
   } else {
     chrome.storage.local.set({ isEnabled: true }, function () { }) //need to activate auto login feature
-    chrome.runtime.sendMessage({ cmd: "clear_badge" });
-    chrome.runtime.sendMessage({ cmd: "set_user_data", userData: { asdf: asdf, fdsa: fdsa } })
-    document.getElementById('status_msg').innerHTML = ""
+    if (!slubData) {
+      chrome.runtime.sendMessage({ cmd: "clear_badge" });
+    }
+    chrome.runtime.sendMessage({ cmd: "set_user_data", userData: { asdf: asdf, fdsa: fdsa }, slubData: slubData})
+    document.getElementById(id_prefix + 'status_msg').innerHTML = ""
     document.getElementById("save_data").innerHTML = '<font>Gespeichert!</font>'
     document.getElementById("save_data").disabled = true;
     document.getElementById("save_data").style.backgroundColor = "rgb(47, 143, 18)"
     document.getElementById("username_field").value = ""
     document.getElementById("password_field").value = ""
-    document.getElementById('status_msg').innerHTML = "<font color='green'>Du bist angemeldet und wirst automatisch in Opal & Co. eingeloggt.</font>"
+    if (slubData && !asdf.match(/\d{7}/)) {
+      document.getElementById('slub_status_msg').innerHTML = "<font color='orange'>Stelle sicher, dass der Benutzername stimmt! Normalerweise sind es sieben Zahlen! Der automatische Login wird trotzdem versucht!</font>"
+    } else {
+      if (slubData) {
+        document.getElementById('slub_status_msg').innerHTML = "<font color='green'>Du bist angemeldet und wirst automatisch bei der SLUB eingeloggt.</font>"
+      } else {
+        document.getElementById('status_msg').innerHTML = "<font color='green'>Du bist angemeldet und wirst automatisch in Opal & Co. eingeloggt.</font>"
+      }
+    }
     setTimeout(() => {
       document.getElementById("save_data").innerHTML = 'Speichern'
       document.getElementById("save_data").disabled = false;
@@ -22,38 +34,77 @@ function saveUserData() {
   }
 }
 
+function reqSlubPermissions(isFirefox = false) {
+  return new Promise(async (resolve, reject) => {
+    chrome.permissions.contains({origins: ["*://*.slub-dresden.de/*"]}, (result) => {
+      if (result) {
+        resolve(true)
+      } else {
+        chrome.permissions.request({origins: ["*://*.slub-dresden.de/*"]}, (granted) => {
+          if (granted) {
+            if(isFirefox){
+              alert("Perfekt! Bitte starte den Browser einmal neu, damit die Einstellungen uebernommen werden!")
+              chrome.runtime.sendMessage({ cmd: 'reload_extension' }, function (result) { })
+            }
+            resolve(true)
+          } else {
+            alert("TUfast braucht diese Berechtigung, um dich bei der SLUB anzumelden. Versuche es erneut.");
+            resolve(false)
+          }
+        });
+      }
+    });
+  });
+}
 
 function deleteUserData() {
-  chrome.runtime.sendMessage({ cmd: "clear_badge" });
-  chrome.storage.local.set({ Data: "undefined" }, function () { }) //this is how to delete user data!
-  chrome.storage.local.set({ isEnabled: false }, function () { }) //need to deactivate auto login feature
-  // -- also delete courses in dashboard
-  chrome.storage.local.set({ meine_kurse: false }, function () { })
-  chrome.storage.local.set({ favoriten: false }, function () { })
+  let slubData = document.getElementById('portal_field').value == 'slub'
+  let id_prefix = slubData ? 'slub_' : ''
+
+  if(slubData) {
+    delSlubPermissions()
+  }
+
+  chrome.runtime.sendMessage({ cmd: 'is_user_data_available' }, (result) => {
+    chrome.storage.local.set({ isEnabled: (result.selma || result.slub) }, () => { })
+  })
+  if (slubData) {
+    chrome.storage.local.set({ SData: "undefined" }, function () { }) //this is how to delete user data!
+  } else {
+    chrome.runtime.sendMessage({ cmd: "clear_badge" });
+    chrome.storage.local.set({ Data: "undefined" }, function () { }) //this is how to delete user data!
+    // -- also delete courses in dashboard
+    chrome.storage.local.set({ meine_kurse: false }, function () { })
+    chrome.storage.local.set({ favoriten: false }, function () { })
+    // --
+    // -- also deactivate owa fetch
+    document.getElementById('owa_mail_fetch').checked = false
+    chrome.runtime.sendMessage({ cmd: 'disable_owa_fetch' })
+    chrome.storage.local.set({ "enabledOWAFetch": false })
+    chrome.storage.local.set({ additionalNotificationOnNewMail: false })
+    document.getElementById("additionalNotification").checked = false
+  }
   // --
-  // -- also deactivate owa fetch
-  document.getElementById('owa_mail_fetch').checked = false
-  chrome.runtime.sendMessage({ cmd: 'disable_owa_fetch' })
-  chrome.storage.local.set({ "enabledOWAFetch": false })
-  chrome.storage.local.set({ additionalNotificationOnNewMail: false })
-  document.getElementById("additionalNotification").checked = false
-  // --
-  document.getElementById('status_msg').innerHTML = ""
+  document.getElementById(id_prefix + 'status_msg').innerHTML = ""
   document.getElementById("delete_data").innerHTML = '<font>Gel&ouml;scht!</font>'
   document.getElementById("delete_data").style.backgroundColor = "rgb(47, 143, 18)"
   document.getElementById("delete_data").disabled = true
   document.getElementById("username_field").value = ""
   document.getElementById("password_field").value = ""
-  document.getElementById('status_msg').innerHTML = "<font color='grey'>Du bist nicht angemeldet.</font>"
+  document.getElementById(id_prefix + 'status_msg').innerHTML = "<font color='grey'>Du bist nicht angemeldet.</font>"
   setTimeout(() => {
-    document.getElementById("delete_data").innerHTML = 'Alle Daten l&ouml;schen';
-    document.getElementById("delete_data").style.backgroundColor = "grey"
-    document.getElementById("delete_data").disabled = false
-    chrome.storage.local.get(['Data'], function (result) {
-    })
+    document.getElementById(id_prefix + "delete_data").innerHTML = 'Alle Daten l&ouml;schen';
+    document.getElementById(id_prefix + "delete_data").style.backgroundColor = "grey"
+    document.getElementById(id_prefix + "delete_data").disabled = false
   }, 2000)
-
 }
+
+function delSlubPermissions() {
+  chrome.permissions.contains({origins: ["*://*.slub-dresden.de/*"]}, (result) => {
+    if (result) {chrome.permissions.remove({origins: ["*://*.slub-dresden.de/*"]}, () => {});}
+  });
+}
+
 function fwdGoogleSearch() {
   chrome.storage.local.get(['fwdEnabled'], function (result) {
     chrome.storage.local.set({ fwdEnabled: !(result.fwdEnabled) }, function () { })
@@ -198,10 +249,40 @@ function requestHostPermissionS() {
 
 //this need to be done here since manifest v2
 window.onload = async function () {
+  //only display additionNotificationSection in chrome, because it doesnt work in ff
+  let isFirefox = navigator.userAgent.includes("Firefox/")  //attention: no failsave browser detection
+  if (isFirefox) { document.getElementById("additionNotificationSection").style.display = "none" }
 
   //assign functions
-  document.getElementById('save_data').onclick = saveUserData
+  document.getElementById('save_data').onclick = saveUserData // use unnamed function because otherwise first argument always would be the event
   document.getElementById('delete_data').onclick = deleteUserData
+  let portal_field = document.getElementById('portal_field')
+  portal_field.addEventListener('change', () => {
+    switch (portal_field.value) {
+      case "slub": reqSlubPermissions(isFirefox).then((granted) => {
+        if(granted) {
+          document.getElementById('username_field').placeholder = "Nutzername (SLUB-Login)"
+          document.getElementById('password_field').placeholder = "Passwort (SLUB-Login)"
+          document.getElementById('delete_data').innerHTML = "SLUB Daten l&ouml;schen"
+          document.getElementById('status_msg').style.display = "none"
+          document.getElementById('slub_status_msg').style.display = "inline"
+          document.getElementById('status_msg2').style.display = "none"
+          document.getElementById('slub_status_msg2').style.display = ""
+        } else {
+          portal_field.value="selma"
+        }
+      });
+      break;
+      default:
+        document.getElementById('username_field').placeholder = "Nutzername (Selma-Login)"
+        document.getElementById('password_field').placeholder = "Passwort (Selma-Login)"
+        document.getElementById('delete_data').innerHTML = "Selma Daten l&ouml;schen"
+        document.getElementById('status_msg').style.display = "inline"
+        document.getElementById('slub_status_msg').style.display = "none"
+        document.getElementById('status_msg2').style.display = ""
+        document.getElementById('slub_status_msg2').style.display = "none"
+    } 
+  });
   document.getElementById('switch_fwd').onclick = fwdGoogleSearch
   document.getElementById('open_shortcut_settings').onclick = openKeyboardSettings
   document.getElementById('open_shortcut_settings1').onclick = openKeyboardSettings
@@ -209,10 +290,6 @@ window.onload = async function () {
 
   //document.getElementById('fav').onclick = dashboardCourseSelect
   //document.getElementById('crs').onclick = dashboardCourseSelect
-
-  //only display additionNotificationSection in chrome, because it doesnt work in ff
-  let isFirefox = navigator.userAgent.includes("Firefox/")  //attention: no failsave browser detection
-  if (isFirefox) { document.getElementById("additionNotificationSection").style.display = "none" }
 
   //add additional notification checkbox listener
   var checkbox = document.getElementById("additionalNotification");
@@ -281,6 +358,8 @@ window.onload = async function () {
     chrome.storage.local.set({ pdfInNewTab: this.checked }, function () { });
   });
 
+  
+
   //set all switches and elements
   displayEnabled()
 
@@ -305,6 +384,14 @@ window.onload = async function () {
     this.document.getElementById("settings_comment").innerHTML = "Bereits " + clicksToTimeNoIcon(result.saved_click_counter)
     chrome.storage.local.set({ openSettingsPageParam: false }, function () { })
   })
+
+  chrome.runtime.sendMessage({ cmd: "get_user_data", slubData: true }, (response) => {
+    if (!(response.asdf === undefined  || response.fdsa === undefined)) { 
+      document.getElementById('slub_status_msg').innerHTML = "<font color='green'>Du bist angemeldet und wirst automatisch bei der SLUB eingeloggt.</font>"
+    } else {
+      document.getElementById('slub_status_msg').innerHTML = "<font color='grey'>Du bist nicht angemeldet.</font>"
+    }
+  });
 
   //prep accordion
   let acc = document.getElementsByClassName("accordion");
